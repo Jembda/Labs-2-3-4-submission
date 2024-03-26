@@ -54,22 +54,35 @@ const grammar = {
   christiano: { response: "Christiano Ronaldo is footballer."}, 
 
 };
+
+const entities = [
+
+  "Nelson Mandela",
+  "Fidel Castro",
+  "Indira Gandhi",
+  "Kobe Bryant",
+  "Noam Chomsky ",
+  "Dag Hammarskjöld",
+  "Vladimir Putin",
+  "Donald Trump",
+  "Vladimir Putin",
+  "Christiano Ronaldo",
+ 
+]
+
 /* Helper functions */
-function isInGrammar(utterance) {
-    return utterance.toLowerCase() in grammar;
-  }
+ 
   
   function getPerson(utterance) {
     return (grammar[utterance.toLowerCase()] || {}).person;
   }
 
-const ASR_THRESHOLD = 0.7;
-const NLU_THRESHOLD = 0.8; 
+// const ASR_THRESHOLD = 0.7;
+// const NLU_THRESHOLD = 0.8; 
 
 const dmMachine = setup({
     actions: {
-        handleASRResult: (context, evetn) => context.handleASRResult(context, event),
-        handleNLUResult: (context, evetn) => context.handleNLUResult(context, event),
+        
     },
     
 }).createMachine({
@@ -84,6 +97,8 @@ const dmMachine = setup({
         isWholeDay: false,
         ssRef: null,
     },
+    id: "DM",
+    initial: "Prepare",
     states: {
         Prepare: {
             entry: [
@@ -93,7 +108,8 @@ const dmMachine = setup({
                 ({ context }) => context.ssRef.send({ type: "PREPARE" }),
             ],
             on: { ASRTTS_READY: "CreateAppointment" },
-        },    CreateAppointment: {
+        },    
+        CreateAppointment: {
       initial: "Start",
       states: {
         Start: {
@@ -104,24 +120,73 @@ const dmMachine = setup({
                 utterance: "Hello, welcome! Who would you like to meet?",
               },
             }),
-          on: { SPEAK_COMPLETE: "GetName" },
+          on: { SPEAK_COMPLETE: "ListenToStart" },
         },
-        GetName: {
-          entry: ({ context }) =>
-            context.ssRef.send({
-              type: "LISTEN",
-            }),
+        ListenToStart: {
+          entry: ({ context }) => context.ssRef.send({ type: "LISTEN", value: { nlu: true },
+        }),
           on: {
-            RECOGNISED: {
-              target: "GetMeetingDay",
-              actions: [
-                assign({
-                  meetingWithName: ({ _, event }) => event.value[0].utterance.toLowerCase(),
-                }),
+              RECOGNISED: [
+                  {
+                      // guard: ({_, event}) => event.value[0].utterance.toLowerCase() === "vip",
+                      guard: ({_, event}) => event.value[0].utterance.toLowerCase() === 0,
+                      target: "#DM.CreateAppointment.NoInput",  
+                  },
+                  
+                  
               ],
-            },
-          },
+              NOINPUT: {
+                target: "#DM.CreateAppointment.NoInput",
+              }                              
+              
+          },               
+            
         },
+        NoInput: {
+          entry: ({ context }) => {
+              
+              context.ssRef.send({
+                  type: "SPEAK",
+                  value: {
+                      utterance: `I don't get it! Please say a name.`,
+                  },
+              });
+          },
+
+          on: { SPEAK_COMPLETE: "GetName" },
+          after: {
+            10000: "#DM.CreateAppointment.ListenToStart",
+          }
+          
+      },     
+        GetName: {
+          entry: ({ context}) => {
+              // const topIntent = event.nluValue?.topIntent;
+              // const firstEntity = event.nluValue?.entities?.[0];
+              // const secondEntity = event.nluValue?.entities?.[1];             
+              
+              context.ssRef.send({ type: "LISTEN" });
+          },
+          on: {
+              RECOGNISED: {
+                  target: "GetMeetingDay",
+                  
+                  actions: [
+                      assign({
+                          
+                          meetingWithName: ({ _, event }) => event.value[0].utterance,
+                          // meetingWithName: ({_, event}) => event.value && event.value[0] ? event.value[0].utterance : "",
+                                                    
+                      }),                      
+                      ({ event }) => event.nluValue?.intent.entities?.[0],
+                      ({ event }) => event.nluValue?.intent.entities?.[1],
+                          // Add more assignments as needed
+                        // ({ event }) => console.log(event.nluValue[0].confidence),
+                        // ({ event }) => console.log(event.nluValue[0].intent),
+                  ],
+              },
+          },
+      },
         GetMeetingDay: {
           entry: ({ context }) =>
             context.ssRef.send({
@@ -141,6 +206,7 @@ const dmMachine = setup({
             RECOGNISED: {
               target: "IsWholeDay",
               actions: assign({
+                
                 meetingDate: ({ event }) => event.value[0].utterance.toLowerCase(),
               }),
             },
@@ -191,6 +257,7 @@ const dmMachine = setup({
             context.ssRef.send({
               type: "LISTEN",
             }),
+
           on: {
             RECOGNISED: [
               {
@@ -208,8 +275,11 @@ const dmMachine = setup({
                 }),
               },
             ],
-            NOINPUT: "HandleNoInput",
-            NOMATCH: "HandleOutOfGrammar",
+            NOINPUT: {
+              entry: "HandleNoInput",
+              always: "waitForUserInput"
+            }
+            
           },
         },
         GetMeetingTime: {
@@ -247,7 +317,7 @@ const dmMachine = setup({
                 utterance: "I'm sorry, could you please repeat that? If you need assistance, just say 'help'.",
               },
             }),
-          on: { SPEAK_COMPLETE: "ListenMeetingTime" },
+          on: { SPEAK_COMPLETE: "ListenMeetingTime", },
         },
         ConfirmWholeDayAppointment: {
           entry: ({ context }) =>
@@ -289,9 +359,9 @@ const dmMachine = setup({
                 }),
               },
             ],
-            NOINPUT: "HandleNoInput",
-            NOMATCH: "HandleOutOfGrammar",
-            REPEAT: "RepeatPrompt",
+            target: "HandleNoInput",
+            target: "HandleOutOfGrammar",
+            target: "RepeatPrompt",
           },
         },
         AppointmentCreated: {
@@ -318,21 +388,6 @@ const dmMachine = setup({
     },
   },
 });
-const handleASRResult = (recognizedText, confidence, context) => {
-  if (confidence >= ASR_THRESHOLD) {
-      context.send({ type: "RECOGNIZED", text: recognizedText });
-  } else {
-      context.send({ type: "ASK_FOR_CONFIRMATION", text: recognizedText})
-  }
-};
-
-const handleNLUResult = (intent, confidence, context) => {
-  if (confidence >= NLU_THRESHOLD) {
-      context.send({ type: "RECOGNIZED_INTENT", intent });
-  } else {
-      context.send({ type: "ASK_FOR_INTENT_CONFIRMATION", text: recognizedText})
-  }
-};
         
 const dmActor = createActor(dmMachine, {
   inspect: inspector.inspect,
@@ -342,9 +397,12 @@ dmActor.subscribe((state) => {
   /* if you want to log some parts of the state */
   console.log("Current state:", state.value);
   console.log("Meeting with: ", state.context.meetingWithName);
-  const { intent, confidence } = state.context;
-  console.log("Intent:", intent, "\nConfidence:", confidence);
+  const { intent, topIntent, firstEntity, secondEntity, thirdEntity, confidence } = state.context;
+  console.log("Intent:", intent, "\nTop Intent:", topIntent, "\nFirst Entity:", firstEntity, "\nSecond Entity:", secondEntity, "\nThird Entity:", thirdEntity, "\nConfidence:", confidence);
+
 });
+
+
 
 export function setupButton(element) {
   element.addEventListener("click", () => {
