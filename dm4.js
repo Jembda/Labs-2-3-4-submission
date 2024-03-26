@@ -1,34 +1,35 @@
 import { assign, createActor, setup } from "xstate";
 import { speechstate } from "speechstate";
 import { createBrowserInspector } from "@statelyai/inspect";
-import { KEY } from "./azure.js";
+import { KEY, NLU_KEY } from "./azure.js";
 
 const inspector = createBrowserInspector();
 
+
 const azureCredentials = {
-  endpoint:
-    "https://northeurope.api.cognitive.microsoft.com/sts/v1.0/issuetoken",
-  key: KEY,
+    endpoint:"https://northeurope.api.cognitive.microsoft.com/sts/v1.0/issuetoken",
+    key: KEY,
 };
 
 const azureLanguageCredentials = {
-    endpoint: "https://260026.cognitiveservices.azure.com/language/:analyze-conversations?api-version=2022-10-01-preview" /** your Azure CLU prediction URL */,
-    key: NLU_KEY /** reference to your Azure CLU key */,
-    deploymentName: "Apointment" /** your Azure CLU deployment */,
-    projectName: "Apointment" /** your Azure CLU project name */,
-  };
-  
-  const settings = {
-    azureLanguageCredentials: azureLanguageCredentials /** global activation of NLU */,
+    endpoint: "https://260026.cognitiveservices.azure.com/language/:analyze-conversations?api-version=2022-10-01-preview",
+    key: NLU_KEY,
+    deploymentName: "Apointment",
+    projectName: "Apointment",
+
+};
+
+const settings = {
+    azureLanguageCredentials: azureLanguageCredentials,
     azureCredentials: azureCredentials,
     asrDefaultCompleteTimeout: 0,
     asrDefaultNoInputTimeout: 5000,
-    locale: "en-US",
+    local: "en-US",
     ttsDefaultVoice: "en-US-DavisNeural",
-  };
-          
-  
-/* Grammar definition */
+
+}
+
+/* Grammar defination */    
 const grammar = {
   vlad: { person: "Vladislav Maraev" },
   aya: { person: "Nayat Astaiza Soriano" },
@@ -40,13 +41,13 @@ const grammar = {
   "11": { time: "11:00" },
   yes: { response: "yes" },
   no: { response: "no" },
-  nelson: { response: "Nelson Mandela was South Africa President." },
-  castro: { response: "Fidel Castro was Cuba President."},
-  gandhi: { response: "Indira Gandhi was India PM."},
+  nelson: { response: "Nelson Mandela was South Africa's President." },
+  castro: { response: "Fidel Castro was Cuba's President."},
+  gandhi: { response: "Indira Gandhi was India's PM."},
   kobe: { response: "Kobe Bryant was Basketball player."},
   chomsky: { response: "Noam Chomsky is father of generative grammar."},
-  dag: { response: "Dag Hammarskjöld UN secretary general."},
-  trump: { response: "Donald Trump former US president."},
+  dag: { response: "Dag Hammarskjöld was UN secretary general."},
+  trump: { response: "Donald Trump is former US president."},
   putin: { response: "Vladimir Putin is current Russia president"},
   haile: { response: "Haile Gebreselassie is long distance runner."},
   christiano: { response: "Christiano Ronaldo is footballer."}, 
@@ -159,7 +160,7 @@ id: "DM",
            context.ssRef.send({
             type: "SPEAK",
             value: {
-              utterance: "Welcome to our Service center. Do you have an appointment? Who are you meeting with?",
+              utterance: "Hello, welcome! Who would you like to meet?",
             },
            }),
            on: {SPEAK_COMPLETE: "GetName" },
@@ -214,9 +215,9 @@ id: "DM",
               utterance: "Will it take the whole day?",
             },
           }),
-          on: {SPEAK_COMPLETE: "ListenWholeDay" },
+          on: {SPEAK_COMPLETE: "CheckWholDay" }, //"ListenWholeDay"
         },
-        ListenWholeDay: {
+        CheckWholDay: {
           entry: ({ context }) =>
           context.ssRef.send({
             type: "LISTEN"
@@ -227,7 +228,7 @@ id: "DM",
                 guard: ( { event }) => event.value[0].utterance.toLowerCase() === "yes",
               target: "ConfirmWholeDayAppointment",
               actions: assign({
-                isWholeDay: true,
+                isWholeDay: "yes",
 
               }),
               },
@@ -235,7 +236,7 @@ id: "DM",
                 guard: ( { event }) => event.value[0].utterance.toLowerCase() === "no",
                 target: "GetMeetingTime", 
                 actions: assign({
-                  isWholeDay: false,
+                  isWholeDay: "no",
                 }),
               },              
             ],
@@ -264,11 +265,12 @@ id: "DM",
         //   context.ssRef.send({
         //     type: "LISTEN",
         //   }),
+        //activation of NLU */,
           on: {
             RECOGNISED:{
               target: "ConfirmAppointment",
               actions: assign({
-                MeetingTime: ( { event }) => event.value[0].utterance.toLowerCase(),
+                meetingTime: ( { event }) => event.value[0].utterance.toLowerCase(),
               }),
             },
           },           
@@ -278,7 +280,7 @@ id: "DM",
           context.ssRef.send({
             type: "SPEAK",
             value: {
-              utterance: 'Do you want to create an appointment with ${meetingWithName} on ${meetingDate} for the whole day?',
+              utterance: `Do you want to create an appointment with ${context.meetingWithName} on ${context.meetingDate} for the whole day?`,
             },
           }),
           on: { SPEAK_COMPLETE: "ListenConfirmation" }, 
@@ -289,7 +291,7 @@ id: "DM",
           context.ssRef.send({
             type: "SPEAK",
             value: {
-              utterance: 'Do you want to create an appointment with ${meetingWithName} on ${meetingDate} at ${context.meetingTime}?',
+              utterance: `Do you want to create an appointment with ${context.meetingWithName} on ${context.meetingDate} at ${context.meetingTime}?`,
             },
           }),
           on: { SPEAK_COMPLETE: "ListenConfirmation" },
@@ -309,12 +311,13 @@ id: "DM",
                 guard: ( { event }) => event.value[0].utterance.toLowerCase() === "no",
                 target: "AppointmentNotCreated",
                 actions: assign({
-                  meetingWithName: "",
-                  meetingDate: "",
+                  //meetingWithName: "", 
+                  //meetingDate: "",
                   meetingTime: "",
                   isWholeDay: false,
                 }),
               },
+              //It should make ask you to reapet the same question.. 
             ],
           },
         },
@@ -323,7 +326,7 @@ id: "DM",
           context.ssRef.send({
             type: "SPEAK",
             value: {
-              utterance: "Your appointment has been created."
+              utterance: "Your appointment has been created.",
             },
           }),
           type: "final",
@@ -350,7 +353,7 @@ const dmActor = createActor(dmMachine, {
 dmActor.subscribe((state) => {
   /* if you want to log some parts of the state */
   console.log("Current state:", state.value);
-  console.log("Meeting with: ", state.context.meetingWithName)
+  console.log("Meeting with: ", state.context.meetingWithName);
 });
 
 export function setupButton(element) {
